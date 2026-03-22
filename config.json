@@ -1,0 +1,78 @@
+{
+  "model_type": "fastconformer_rnnt",
+  "source_model": "nvidia/nemotron-speech-streaming-en-0.6b",
+
+  "audio": {
+    "sample_rate": 16000,
+    "sample_format": "S16_LE",
+    "bytes_per_second": 32000
+  },
+
+  "preprocessor": {
+    "n_mels": 128,
+    "n_fft": 512,
+    "hop_length": 160,
+    "win_length": 400,
+    "window": "hann",
+    "preemph": 0.97,
+    "dither": 1e-05,
+    "normalize": null,
+    "pad_to": 0,
+    "mel_norm": "slaney",
+    "mel_layout": "band_major",
+    "_comment": "mel_layout=band_major means output shape is [n_mels, n_frames], not [n_frames, n_mels]"
+  },
+
+  "encoder": {
+    "model_file": "encoder_model.onnx",
+    "layers": 24,
+    "dim": 1024,
+    "chunk_mel_frames": 56,
+    "pre_encode_cache_frames": 9,
+    "total_input_frames": 65,
+    "cache_last_channel_shape": [1, 24, 70, 1024],
+    "cache_last_time_shape": [1, 24, 1024, 8],
+    "inputs": {
+      "audio_signal": {"dtype": "float32", "shape": ["batch", 128, "chunk_mel_frames + pre_encode_cache_frames"]},
+      "length": {"dtype": "int64", "shape": ["batch"], "value": "total mel frames in audio_signal (cache + new)"},
+      "cache_last_channel": {"dtype": "float32", "shape": [1, 24, 70, 1024], "init": "zeros"},
+      "cache_last_time": {"dtype": "float32", "shape": [1, 24, 1024, 8], "init": "zeros"},
+      "cache_last_channel_len": {"dtype": "int64", "shape": [1], "init": "zeros"}
+    },
+    "outputs": {
+      "outputs": {"dtype": "float32", "shape": ["batch", 1024, "n_encoded_frames"]},
+      "encoded_lengths": {"dtype": "int64", "shape": ["batch"]},
+      "cache_last_channel_next": {"dtype": "float32", "shape": [1, 24, 70, 1024], "_comment": "feed back as cache_last_channel"},
+      "cache_last_time_next": {"dtype": "float32", "shape": [1, 24, 1024, 8], "_comment": "feed back as cache_last_time"},
+      "cache_last_channel_next_len": {"dtype": "int64", "shape": [1], "_comment": "feed back as cache_last_channel_len"}
+    }
+  },
+
+  "decoder": {
+    "model_file": "decoder_model.onnx",
+    "prediction_layers": 2,
+    "prediction_hidden": 640,
+    "vocab_size": 1025,
+    "blank_id": 1024,
+    "max_symbols_per_frame": 10,
+    "inputs": {
+      "encoder_outputs": {"dtype": "float32", "shape": ["batch", 1024, 1], "_comment": "single encoder frame"},
+      "targets": {"dtype": "int32", "shape": ["batch", 1], "_comment": "previous non-blank token (0 for first)"},
+      "target_length": {"dtype": "int32", "shape": ["batch"], "value": 1},
+      "input_states_1": {"dtype": "float32", "shape": [2, "batch", 640], "init": "zeros"},
+      "input_states_2": {"dtype": "float32", "shape": [2, "batch", 640], "init": "zeros"}
+    },
+    "outputs": {
+      "outputs": {"dtype": "float32", "shape": ["batch", 1, 1, 1025], "_comment": "logits over vocab, argmax to get token"},
+      "prednet_lengths": {"dtype": "int32", "shape": ["batch"]},
+      "output_states_1": {"dtype": "float32", "shape": [2, "batch", 640], "_comment": "feed back as input_states_1"},
+      "output_states_2": {"dtype": "float32", "shape": [2, "batch", 640], "_comment": "feed back as input_states_2"}
+    }
+  },
+
+  "streaming": {
+    "chunk_duration_ms": 560,
+    "chunk_audio_samples": 8960,
+    "algorithm": "Cache-aware streaming FastConformer. Feed 560ms audio chunks. For each chunk: compute mel (56 frames), prepend 9 cached frames, run encoder. Then for each encoder output frame, run RNNT greedy decode: feed one encoder frame to decoder, argmax logits, if not blank emit token and loop (up to max_symbols_per_frame), if blank move to next frame. Feed cache outputs back as next chunk's cache inputs. Feed decoder states back for next symbol/frame."
+  }
+}

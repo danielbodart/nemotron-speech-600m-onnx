@@ -1,0 +1,11 @@
+# Model files (stored on Hugging Face Hub, not in git)
+*.onnx
+*.onnx.data
+*.bin
+dist/
+models/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
