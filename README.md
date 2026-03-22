@@ -16,25 +16,44 @@ The original NeMo model requires the full NeMo toolkit to run. Third-party ONNX 
 | FP16 | 1.2 GB | NVIDIA GPU (tensor cores), Apple Silicon | Recommended for GPU inference |
 | INT8 | 876 MB | Intel CPU (VNNI/AMX) | Dynamic quantization, encoder MatMul weights only |
 
+## Project Layout
+
+```
+nemotron-speech-600m-onnx/
+├── config.json                  # Machine-readable runtime parameters
+├── nemo_export_onnx.py          # Export from NeMo checkpoint → models/fp32/
+├── onnx_fp16_convert.py         # models/fp32/ → models/fp16/
+├── onnx_fp16_validate.py        # Validate FP16 against FP32
+├── onnx_int8_quantize.py        # models/fp32/ → models/int8/
+├── onnx_int8_calibration.py     # Mel calibration data reader for static quantization
+├── onnx_int8_validate.py        # Validate INT8 against FP32
+├── onnx_package_for_hf.py       # Consolidate and package for HF Hub upload
+├── models/                      # Local model files (gitignored)
+│   ├── fp32/                    # NeMo export output
+│   ├── fp16/                    # FP16 conversion output
+│   └── int8/                    # INT8 quantization output
+└── test/                        # WAV files for calibration/validation (gitignored)
+```
+
 ## Scripts
 
-### Export from NeMo
+### 1. Export from NeMo
 
 ```bash
 uv run --with "nemo_toolkit[asr]" python3 nemo_export_onnx.py [output-dir]
 ```
 
-Downloads the pretrained model from HuggingFace, exports encoder + decoder to ONNX, and saves the filterbank weights, vocabulary, and preprocessor config. Requires a CUDA GPU.
+Downloads the pretrained model from HuggingFace, exports encoder + decoder to ONNX, and saves the filterbank weights, vocabulary, and preprocessor config. Requires a CUDA GPU. Default output: `models/fp32/`.
 
-### FP16 Conversion
+### 2. FP16 Conversion
 
 ```bash
 uv run --with "onnx>=1.20,numpy" python3 onnx_fp16_convert.py
 ```
 
-Converts FP32 models to FP16. All weights, constants, and Cast nodes are converted. I/O is wrapped with Cast nodes so the external interface stays FP32 (no calling code changes needed).
+Converts FP32 models to FP16. All weights, constants, and Cast nodes are converted. I/O is wrapped with Cast nodes so the external interface stays FP32 (no calling code changes needed). Reads from `models/fp32/`, writes to `models/fp16/`.
 
-### FP16 Validation
+### 3. FP16 Validation
 
 ```bash
 uv run --with "onnx>=1.20,onnxruntime>=1.24,numpy" python3 onnx_fp16_validate.py
@@ -42,27 +61,27 @@ uv run --with "onnx>=1.20,onnxruntime>=1.24,numpy" python3 onnx_fp16_validate.py
 
 Runs both FP32 and FP16 models on identical synthetic input (CPU, deterministic) and compares outputs numerically. Encoder max abs diff < 0.001, decoder argmax agreement > 99%.
 
-### INT8 Quantization
+### 4. INT8 Quantization
 
 ```bash
 uv run --with "onnx>=1.20,onnxruntime>=1.24,numpy" python3 onnx_int8_quantize.py
 ```
 
-Applies dynamic INT8 quantization to encoder MatMul weights via `onnxruntime.quantization.quantize_dynamic`. Decoder stays FP32 (too small to benefit). Note: static quantization breaks streaming — produces all BLANK tokens.
+Applies dynamic INT8 quantization to encoder MatMul weights via `onnxruntime.quantization.quantize_dynamic`. Decoder stays FP32 (too small to benefit). Reads from `models/fp32/`, writes to `models/int8/`. Note: static quantization breaks streaming — produces all BLANK tokens.
 
-### INT8 Validation
+### 5. INT8 Validation
 
 ```bash
 uv run --with "onnx>=1.20,onnxruntime>=1.24,numpy" python3 onnx_int8_validate.py
 ```
 
-### Package for Hugging Face Hub
+### 6. Package for Hugging Face Hub
 
 ```bash
 uv run --with "onnx>=1.20,numpy" python3 onnx_package_for_hf.py
 ```
 
-Consolidates per-tensor external data files into single `.onnx.data` files, renames to HF conventions, and organizes into `fp32/`, `fp16/`, `int8/`, and `shared/` directories ready for upload.
+Consolidates per-tensor external data files into single `.onnx.data` files, renames to HF conventions, and organizes into `hf-upload/` ready for `hf upload`.
 
 ## Runtime Configuration
 

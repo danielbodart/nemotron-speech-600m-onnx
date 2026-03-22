@@ -6,7 +6,7 @@ Produces three ONNX files (encoder, decoder, joiner) suitable for
 direct onnxruntime inference with cache-aware streaming.
 
 Usage:
-    uv run --with "nemo_toolkit[asr]" python3 scripts/nemo_export_onnx.py [output-dir]
+    uv run --with "nemo_toolkit[asr]" python3 nemo_export_onnx.py [output-dir]
 """
 import sys
 import os
@@ -14,7 +14,7 @@ import torch
 import numpy as np
 
 def main():
-    out_dir = sys.argv[1] if len(sys.argv) > 1 else "dist/models/nemotron-600m-onnx"
+    out_dir = sys.argv[1] if len(sys.argv) > 1 else "models/fp32"
     os.makedirs(out_dir, exist_ok=True)
 
     import nemo.collections.asr as nemo_asr

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Quantize Nemotron encoder to INT8 using ONNX Runtime quantization.
 
-Reads the FP32 encoder from dist/models/nemotron-600m-onnx/, quantizes,
-and writes to dist/models/nemotron-600m-onnx-int8/.
+Reads the FP32 encoder from models/fp32/, quantizes,
+and writes to models/int8/.
 
 Default mode is 'dynamic' (weights quantized to INT8, activations stay FP32).
 Static quantization (weights + activations) is available but breaks streaming
@@ -12,9 +12,9 @@ The decoder stays unquantized (copied from FP32 source).
 External I/O stays FP32 — no Zig runtime changes needed.
 
 Usage:
-    python scripts/onnx_int8_quantize.py                    # dynamic (recommended)
-    python scripts/onnx_int8_quantize.py --mode static      # static (broken for streaming)
-    python scripts/onnx_int8_quantize.py --reduce-range      # for older CPUs without VNNI
+    python onnx_int8_quantize.py                    # dynamic (recommended)
+    python onnx_int8_quantize.py --mode static      # static (broken for streaming)
+    python onnx_int8_quantize.py --reduce-range      # for older CPUs without VNNI
 """
 
 import argparse
@@ -27,10 +27,9 @@ from onnxruntime.quantization import QuantFormat, QuantType, quantize_dynamic, q
 
 from onnx_int8_calibration import MelCalibrationReader
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_DIR = SCRIPT_DIR.parent
-SRC_DIR = PROJECT_DIR / "dist" / "models" / "nemotron-600m-onnx"
-DST_DIR = PROJECT_DIR / "dist" / "models" / "nemotron-600m-onnx-int8"
+PROJECT_DIR = Path(__file__).resolve().parent
+SRC_DIR = PROJECT_DIR / "models" / "fp32"
+DST_DIR = PROJECT_DIR / "models" / "int8"
 WAV_DIR = PROJECT_DIR / "test"
 FILTERBANK_PATH = SRC_DIR / "filterbank.bin"
 

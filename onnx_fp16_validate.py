@@ -11,10 +11,9 @@ from pathlib import Path
 import numpy as np
 import onnxruntime as ort
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_DIR = SCRIPT_DIR.parent
-FP32_DIR = PROJECT_DIR / "dist" / "models" / "nemotron-600m-onnx"
-FP16_DIR = PROJECT_DIR / "dist" / "models" / "nemotron-600m-onnx-fp16"
+PROJECT_DIR = Path(__file__).resolve().parent
+FP32_DIR = PROJECT_DIR / "models" / "fp32"
+FP16_DIR = PROJECT_DIR / "models" / "fp16"
 
 # Thresholds — FP16 has ~3 decimal digits of precision.
 # Logit outputs can have higher absolute diff but what matters is argmax agreement.

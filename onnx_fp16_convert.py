@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Convert Nemotron ONNX models from FP32 to FP16.
 
-Reads from dist/models/nemotron-600m-onnx/, writes to dist/models/nemotron-600m-onnx-fp16/.
-Uses onnxruntime.transformers.float16 for robust conversion that handles all
-internal Constant nodes. Wraps I/O with Cast nodes so external interface stays FP32.
+Reads from models/fp32/, writes to models/fp16/.
+Converts all weights, constants, and Cast nodes to FP16.
+Wraps I/O with Cast nodes so external interface stays FP32.
 """
 
 import shutil
@@ -14,10 +14,9 @@ import numpy as np
 import onnx
 from onnx import TensorProto, helper, numpy_helper
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_DIR = SCRIPT_DIR.parent
-SRC_DIR = PROJECT_DIR / "dist" / "models" / "nemotron-600m-onnx"
-DST_DIR = PROJECT_DIR / "dist" / "models" / "nemotron-600m-onnx-fp16"
+PROJECT_DIR = Path(__file__).resolve().parent
+SRC_DIR = PROJECT_DIR / "models" / "fp32"
+DST_DIR = PROJECT_DIR / "models" / "fp16"
 
 ONNX_MODELS = [
     "encoder-model.onnx",

@@ -1,9 +1,7 @@
 # Model files (stored on Hugging Face Hub, not in git)
-*.onnx
-*.onnx.data
-*.bin
-dist/
 models/
+hf-upload/
+test/
 
 # Python
 __pycache__/

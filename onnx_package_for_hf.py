@@ -2,9 +2,9 @@
 """Package Nemotron ONNX models for Hugging Face Hub upload.
 
 Consolidates per-tensor external data files into single .onnx.data files,
-renames to HF conventions, and organizes into fp32/fp16/shared directories.
+renames to HF conventions, and organizes into hf-upload/ directory.
 
-Output: dist/hf-upload/ ready for `hf upload`
+Output: hf-upload/ ready for `hf upload`
 """
 
 import shutil
@@ -13,13 +13,13 @@ from pathlib import Path
 
 import onnx
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_DIR = SCRIPT_DIR.parent
-OUTPUT_DIR = PROJECT_DIR / "dist" / "hf-upload"
+PROJECT_DIR = Path(__file__).resolve().parent
+OUTPUT_DIR = PROJECT_DIR / "hf-upload"
 
 VARIANTS = {
-    "fp32": PROJECT_DIR / "dist" / "models" / "nemotron-600m-onnx",
-    "fp16": PROJECT_DIR / "dist" / "models" / "nemotron-600m-onnx-fp16",
+    "fp32": PROJECT_DIR / "models" / "fp32",
+    "fp16": PROJECT_DIR / "models" / "fp16",
+    "int8": PROJECT_DIR / "models" / "int8",
 }
 
 # Maps source filenames to HF-convention names

@@ -27,10 +27,9 @@ from onnx_int8_calibration import (
     load_wav_as_f32,
 )
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_DIR = SCRIPT_DIR.parent
-FP32_DIR = PROJECT_DIR / "dist" / "models" / "nemotron-600m-onnx"
-INT8_DIR = PROJECT_DIR / "dist" / "models" / "nemotron-600m-onnx-int8"
+PROJECT_DIR = Path(__file__).resolve().parent
+FP32_DIR = PROJECT_DIR / "models" / "fp32"
+INT8_DIR = PROJECT_DIR / "models" / "int8"
 WAV_DIR = PROJECT_DIR / "test"
 
 # Single-chunk numerical thresholds
