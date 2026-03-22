@@ -14,6 +14,7 @@ import wave
 from pathlib import Path
 
 import numpy as np
+import onnxruntime as ort
 from onnxruntime.quantization import CalibrationDataReader
 
 # NeMo mel parameters — must match nemo_mel.zig exactly
@@ -131,41 +132,93 @@ def compute_mel_bandmajor(samples: np.ndarray, filterbank: np.ndarray) -> np.nda
 
 
 class MelCalibrationReader(CalibrationDataReader):
-    """Yields encoder input dicts from real audio mel spectrograms.
+    """Yields encoder input dicts from real audio mel spectrograms with warm caches.
 
-    Each sample is a 65-frame chunk (PRE_ENCODE_CACHE + MEL_SHIFT) in band-major
-    layout, with zero caches (cold-start calibration).
+    Runs each WAV file's mel chunks sequentially through the FP32 encoder,
+    carrying cache state forward between chunks. The first `warmup_chunks`
+    per file are discarded (cold-start caches produce unrepresentative
+    activation ranges). Only warm-cache samples are used for calibration.
+
+    This is critical for streaming models: zero-cache calibration produces
+    scale factors that don't cover real warm-cache activation ranges, causing
+    output collapse after a few streaming chunks.
     """
 
     def __init__(
         self,
         wav_dir: Path,
         filterbank_path: Path,
+        fp32_model_path: Path,
         max_samples: int = 300,
+        warmup_chunks: int = 3,
     ):
         self.filterbank = load_filterbank(filterbank_path)
-        self.samples: list[np.ndarray] = []
-        self._build_samples(wav_dir, max_samples)
+        self.samples: list[dict] = []
+        self._build_samples(wav_dir, fp32_model_path, max_samples, warmup_chunks)
         self._idx = 0
 
-    def _build_samples(self, wav_dir: Path, max_samples: int) -> None:
-        """Extract mel chunks from all WAV files."""
+    def _build_samples(
+        self, wav_dir: Path, fp32_model_path: Path, max_samples: int, warmup_chunks: int
+    ) -> None:
+        """Run chunks through FP32 encoder sequentially, collecting warm-cache inputs."""
         wav_files = sorted(wav_dir.glob("*.wav"))
         if not wav_files:
             raise FileNotFoundError(f"No WAV files found in {wav_dir}")
 
-        print(f"Building calibration data from {len(wav_files)} WAV files...")
+        # Load FP32 encoder to generate realistic cache states
+        opts = ort.SessionOptions()
+        opts.log_severity_level = 3
+        fp32_session = ort.InferenceSession(
+            str(fp32_model_path), sess_options=opts, providers=["CPUExecutionProvider"]
+        )
+
+        print(f"Building warm-cache calibration data from {len(wav_files)} WAV files...")
+        print(f"  Warmup chunks per file: {warmup_chunks} (discarded)")
+
         for wav_path in wav_files:
             audio = load_wav_as_f32(wav_path)
             mel = compute_mel_bandmajor(audio, self.filterbank)
             n_frames = mel.shape[1]
 
-            # Chunk into TOTAL_CHUNK_FRAMES windows at stride MEL_SHIFT
-            start = 0
-            while start + TOTAL_CHUNK_FRAMES <= n_frames:
-                chunk = mel[:, start:start + TOTAL_CHUNK_FRAMES]  # [128, 65]
-                self.samples.append(chunk)
-                start += MEL_SHIFT
+            # Reset caches for each file (fresh stream)
+            cache_ch = np.zeros((1, ENC_LAYERS, CACHE_CH_DIM, ENC_DIM), dtype=np.float32)
+            cache_time = np.zeros((1, ENC_LAYERS, ENC_DIM, CACHE_TIME_DIM), dtype=np.float32)
+            cache_ch_len = np.zeros((1,), dtype=np.int64)
+            pre_cache = np.zeros((N_MELS, PRE_ENCODE_CACHE), dtype=np.float32)
+
+            cursor = 0
+            chunk_idx = 0
+            while cursor + MEL_SHIFT <= n_frames:
+                # Build chunk: pre_cache + new frames (same as validate/runtime)
+                new_mel = mel[:, cursor:cursor + MEL_SHIFT]
+                chunk = np.concatenate([pre_cache, new_mel], axis=1)  # [128, 65]
+
+                feed = {
+                    "audio_signal": chunk[np.newaxis, :, :].astype(np.float32),
+                    "length": np.array([chunk.shape[1]], dtype=np.int64),
+                    "cache_last_channel": cache_ch.copy(),
+                    "cache_last_time": cache_time.copy(),
+                    "cache_last_channel_len": cache_ch_len.copy(),
+                }
+
+                # Run FP32 encoder to get real cache outputs
+                outputs = fp32_session.run(None, feed)
+                cache_ch = outputs[2]
+                cache_time = outputs[3]
+                cache_ch_len = outputs[4]
+
+                # Update pre-encode cache
+                if new_mel.shape[1] >= PRE_ENCODE_CACHE:
+                    pre_cache = new_mel[:, -PRE_ENCODE_CACHE:]
+                else:
+                    pre_cache = new_mel
+
+                # Only collect samples after warmup (caches are now realistic)
+                if chunk_idx >= warmup_chunks:
+                    self.samples.append(feed)
+
+                cursor += MEL_SHIFT
+                chunk_idx += 1
 
                 if len(self.samples) >= max_samples:
                     break
@@ -173,22 +226,15 @@ class MelCalibrationReader(CalibrationDataReader):
             if len(self.samples) >= max_samples:
                 break
 
-        print(f"  Collected {len(self.samples)} calibration samples from {len(wav_files)} files")
+        print(f"  Collected {len(self.samples)} warm-cache calibration samples")
 
     def get_next(self) -> dict | None:
         if self._idx >= len(self.samples):
             return None
 
-        chunk = self.samples[self._idx]
+        sample = self.samples[self._idx]
         self._idx += 1
-
-        return {
-            "audio_signal": chunk[np.newaxis, :, :].astype(np.float32),  # [1, 128, 65]
-            "length": np.array([TOTAL_CHUNK_FRAMES], dtype=np.int64),
-            "cache_last_channel": np.zeros((1, ENC_LAYERS, CACHE_CH_DIM, ENC_DIM), dtype=np.float32),
-            "cache_last_time": np.zeros((1, ENC_LAYERS, ENC_DIM, CACHE_TIME_DIM), dtype=np.float32),
-            "cache_last_channel_len": np.zeros((1,), dtype=np.int64),
-        }
+        return sample
 
     def rewind(self):
         """Reset iterator to the beginning (required by some ORT quantization flows)."""

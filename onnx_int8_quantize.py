@@ -25,6 +25,15 @@ from pathlib import Path
 import onnx
 from onnxruntime.quantization import QuantFormat, QuantType, quantize_dynamic, quantize_static
 
+# Cache-path nodes to exclude from quantization. These nodes manipulate
+# encoder cache tensors (conv time-cache and attention channel-cache).
+# Quantizing them causes error to compound across streaming chunks.
+CACHE_NODE_PATTERNS = [
+    "depthwise_conv/Concat_1",
+    "depthwise_conv/Slice_2",
+    "depthwise_conv/Pad",
+]
+
 from onnx_int8_calibration import MelCalibrationReader
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -62,7 +71,29 @@ def copy_model_with_external_data(src_path: Path, dst_path: Path) -> None:
     )
 
 
-def quantize_encoder(mode: str = "dynamic", reduce_range: bool = False, max_samples: int = 300) -> None:
+def find_cache_nodes(model_path: Path) -> list[str]:
+    """Find all nodes in the cache manipulation path that should stay FP32."""
+    model = onnx.load(str(model_path), load_external_data=False)
+    exclude = set()
+    for node in model.graph.node:
+        # Nodes matching cache-path patterns (depthwise conv cache ops)
+        for pattern in CACHE_NODE_PATTERNS:
+            if pattern in node.name:
+                exclude.add(node.name)
+        # Nodes directly connected to cache I/O tensors
+        for tensor in list(node.input) + list(node.output):
+            if "cache" in tensor.lower():
+                exclude.add(node.name)
+                break
+        # Unsqueeze nodes feeding the cache_last_time concat
+        if node.name.startswith("/Unsqueeze_") and any(
+            "depthwise_conv/Slice_2" in inp for inp in node.input
+        ):
+            exclude.add(node.name)
+    return sorted(exclude)
+
+
+def quantize_encoder(mode: str = "dynamic", reduce_range: bool = False, max_samples: int = 500) -> None:
     """Quantize the streaming encoder to INT8."""
     src = SRC_DIR / ENCODER_MODEL
     dst = DST_DIR / ENCODER_MODEL
@@ -89,14 +120,19 @@ def quantize_encoder(mode: str = "dynamic", reduce_range: bool = False, max_samp
             op_types_to_quantize=["MatMul"],
         )
     else:
-        # Build calibration reader from real audio
+        # Build calibration reader with warm caches from FP32 model.
+        # 6 warmup chunks (~3.4s) ensures caches are fully representative
+        # before collecting calibration statistics.
         reader = MelCalibrationReader(
             wav_dir=WAV_DIR,
             filterbank_path=FILTERBANK_PATH,
+            fp32_model_path=src,
             max_samples=max_samples,
+            warmup_chunks=6,
         )
 
         print(f"  Running static quantization (U8 activations, S8 weights, per-channel, QDQ)...")
+        print(f"  Only quantizing MatMul ops (like dynamic, but with calibrated activation scales)")
         quantize_static(
             model_input=str(src),
             model_output=str(dst),
@@ -107,9 +143,13 @@ def quantize_encoder(mode: str = "dynamic", reduce_range: bool = False, max_samp
             per_channel=True,
             reduce_range=reduce_range,
             use_external_data_format=True,
+            op_types_to_quantize=["MatMul"],
             extra_options={
                 "WeightSymmetric": True,
                 "ActivationSymmetric": False,
+                "MinimumRealRange": 0.0001,
+                "CalibMovingAverage": True,
+                "CalibMovingAverageConstant": 0.01,
             },
         )
 
@@ -140,8 +180,8 @@ def main() -> None:
     parser.add_argument(
         "--max-samples",
         type=int,
-        default=300,
-        help="Maximum number of calibration samples (default: 300)",
+        default=500,
+        help="Maximum number of calibration samples (default: 500)",
     )
     args = parser.parse_args()
 
