@@ -4,6 +4,8 @@ Scripts to export, convert, quantize, and validate the [NVIDIA Nemotron Speech S
 
 Pre-built model files are available on Hugging Face Hub: **[danielbodart/nemotron-speech-600m-onnx](https://huggingface.co/danielbodart/nemotron-speech-600m-onnx)**
 
+> **Apple Silicon users:** Use the native CoreML version instead — **[danielbodart/nemotron-speech-600m-coreml](https://github.com/danielbodart/nemotron-speech-600m-coreml)**. It runs 93% of encoder ops on the Apple Neural Engine at ~15.5x realtime, vs CPU-only execution with ONNX Runtime on macOS.
+
 ## Why this exists
 
 The original NeMo model requires the full NeMo toolkit to run. Third-party ONNX conversions we found had subtle issues — wrong cache shapes, incorrect mel preprocessing, or quantization that broke streaming accuracy. This repo provides a verified pipeline that exports directly from the original NeMo checkpoint and validates each conversion step numerically.
@@ -13,7 +15,7 @@ The original NeMo model requires the full NeMo toolkit to run. Third-party ONNX 
 | Variant | Size | Target Hardware | Execution Provider | Notes |
 |---------|------|-----------------|--------------------|-------|
 | FP32 | 2.4 GB | Any | CPU, CUDA | Original precision, exported directly from NeMo |
-| FP16 | 1.2 GB | NVIDIA GPU, Apple Silicon | CPU, CUDA | Recommended for GPU inference |
+| FP16 | 1.2 GB | NVIDIA GPU | CPU, CUDA | Recommended for GPU inference |
 | INT8 Dynamic | 876 MB | Intel CPU (VNNI/AMX) | CPU only | Dynamic quantization, MatMul weights only |
 | INT8 Static | 876 MB | NVIDIA GPU, Intel CPU | CPU, CUDA | QDQ format with warm-cache calibration. ~45% less VRAM than FP16 on GPU |
 
@@ -22,7 +24,7 @@ The original NeMo model requires the full NeMo toolkit to run. Third-party ONNX 
 - **NVIDIA GPU (memory constrained):** INT8 Static — loads on CUDA EP, uses ~1.3 GB VRAM vs ~2.4 GB for FP16
 - **NVIDIA GPU (quality first):** FP16 — marginally better on edge cases with repetitive content
 - **Intel CPU:** INT8 Dynamic or INT8 Static — both use VNNI/AMX integer instructions with similar performance
-- **Apple Silicon:** FP16 — optimized for Neural Engine
+- **Apple Silicon:** Use the [CoreML version](https://github.com/danielbodart/nemotron-speech-600m-coreml) instead (93% ANE, ~15.5x realtime). ONNX Runtime on macOS runs CPU-only.
 
 ## Project Layout
 
