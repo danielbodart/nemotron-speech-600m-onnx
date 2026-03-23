@@ -21,7 +21,7 @@ The original NeMo model requires the full NeMo toolkit to run. Third-party ONNX 
 
 - **NVIDIA GPU (memory constrained):** INT8 Static — loads on CUDA EP, uses ~1.3 GB VRAM vs ~2.4 GB for FP16
 - **NVIDIA GPU (quality first):** FP16 — marginally better on edge cases with repetitive content
-- **Intel CPU:** INT8 Dynamic — best CPU throughput via VNNI/AMX integer instructions
+- **Intel CPU:** INT8 Dynamic or INT8 Static — both use VNNI/AMX integer instructions with similar performance
 - **Apple Silicon:** FP16 — optimized for Neural Engine
 
 ## Project Layout
