@@ -19,7 +19,8 @@ OUTPUT_DIR = PROJECT_DIR / "hf-upload"
 VARIANTS = {
     "fp32": PROJECT_DIR / "models" / "fp32",
     "fp16": PROJECT_DIR / "models" / "fp16",
-    "int8": PROJECT_DIR / "models" / "int8",
+    "int8-dynamic": PROJECT_DIR / "models" / "int8-dynamic",
+    "int8-static": PROJECT_DIR / "models" / "int8-static",
 }
 
 # Maps source filenames to HF-convention names

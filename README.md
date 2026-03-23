@@ -10,11 +10,19 @@ The original NeMo model requires the full NeMo toolkit to run. Third-party ONNX 
 
 ## Available Precisions
 
-| Variant | Size | Target Hardware | Notes |
-|---------|------|-----------------|-------|
-| FP32 | 2.4 GB | Any | Original precision, exported directly from NeMo |
-| FP16 | 1.2 GB | NVIDIA GPU (tensor cores), Apple Silicon | Recommended for GPU inference |
-| INT8 | 876 MB | Intel CPU (VNNI/AMX) | Dynamic quantization, encoder MatMul weights only |
+| Variant | Size | Target Hardware | Execution Provider | Notes |
+|---------|------|-----------------|--------------------|-------|
+| FP32 | 2.4 GB | Any | CPU, CUDA | Original precision, exported directly from NeMo |
+| FP16 | 1.2 GB | NVIDIA GPU, Apple Silicon | CPU, CUDA | Recommended for GPU inference |
+| INT8 Dynamic | 876 MB | Intel CPU (VNNI/AMX) | CPU only | Dynamic quantization, MatMul weights only |
+| INT8 Static | 876 MB | NVIDIA GPU, Intel CPU | CPU, CUDA | QDQ format with warm-cache calibration. ~45% less VRAM than FP16 on GPU |
+
+### Choosing a variant
+
+- **NVIDIA GPU (memory constrained):** INT8 Static — loads on CUDA EP, uses ~1.3 GB VRAM vs ~2.4 GB for FP16
+- **NVIDIA GPU (quality first):** FP16 — marginally better on edge cases with repetitive content
+- **Intel CPU:** INT8 Dynamic — best CPU throughput via VNNI/AMX integer instructions
+- **Apple Silicon:** FP16 — optimized for Neural Engine
 
 ## Project Layout
 
@@ -24,14 +32,15 @@ nemotron-speech-600m-onnx/
 ├── nemo_export_onnx.py          # Export from NeMo checkpoint → models/fp32/
 ├── onnx_fp16_convert.py         # models/fp32/ → models/fp16/
 ├── onnx_fp16_validate.py        # Validate FP16 against FP32
-├── onnx_int8_quantize.py        # models/fp32/ → models/int8/
-├── onnx_int8_calibration.py     # Mel calibration data reader for static quantization
+├── onnx_int8_quantize.py        # models/fp32/ → models/int8-{dynamic,static}/
+├── onnx_int8_calibration.py     # Warm-cache mel calibration data reader
 ├── onnx_int8_validate.py        # Validate INT8 against FP32
 ├── onnx_package_for_hf.py       # Consolidate and package for HF Hub upload
 ├── models/                      # Local model files (gitignored)
 │   ├── fp32/                    # NeMo export output
 │   ├── fp16/                    # FP16 conversion output
-│   └── int8/                    # INT8 quantization output
+│   ├── int8-dynamic/            # Dynamic INT8 quantization output
+│   └── int8-static/             # Static INT8 quantization output
 └── test/                        # WAV files for calibration/validation (gitignored)
 ```
 
@@ -64,16 +73,27 @@ Runs both FP32 and FP16 models on identical synthetic input (CPU, deterministic)
 ### 4. INT8 Quantization
 
 ```bash
-uv run --with "onnx>=1.20,onnxruntime>=1.24,numpy" python3 onnx_int8_quantize.py
+# Dynamic (CPU-only, no calibration needed)
+uv run --with "onnx>=1.20,onnxruntime>=1.24,numpy" python3 onnx_int8_quantize.py --mode dynamic
+
+# Static (CUDA-compatible, requires WAV files in test/ for calibration)
+uv run --with "onnx>=1.20,onnxruntime>=1.24,numpy" python3 onnx_int8_quantize.py --mode static
 ```
 
-Applies dynamic INT8 quantization to encoder MatMul weights via `onnxruntime.quantization.quantize_dynamic`. Decoder stays FP32 (too small to benefit). Reads from `models/fp32/`, writes to `models/int8/`. Note: static quantization breaks streaming — produces all BLANK tokens.
+Both modes quantize encoder MatMul weights to INT8. The decoder stays FP32 (too small to benefit).
+
+**Dynamic** uses `quantize_dynamic` — weights are INT8, activations computed at runtime in FP32. Output uses `MatMulInteger` ops which only run on the CPU execution provider.
+
+**Static** uses `quantize_static` with warm-cache streaming calibration — both weights and activations are INT8 with pre-computed scale factors. Output uses QDQ (`QuantizeLinear`/`DequantizeLinear`) nodes which load on both CPU and CUDA execution providers. The warm-cache calibration runs audio chunks sequentially through the FP32 model, carrying encoder cache state forward, to capture realistic activation ranges for streaming inference.
 
 ### 5. INT8 Validation
 
 ```bash
-uv run --with "onnx>=1.20,onnxruntime>=1.24,numpy" python3 onnx_int8_validate.py
+uv run --with "onnx>=1.20,onnxruntime>=1.24,numpy" python3 onnx_int8_validate.py --mode static
+uv run --with "onnx>=1.20,onnxruntime>=1.24,numpy" python3 onnx_int8_validate.py --mode dynamic
 ```
+
+Tests both single-chunk numerical agreement and multi-chunk streaming behavior with warm caches. The streaming test catches quantization errors that compound across chunks.
 
 ### 6. Package for Hugging Face Hub
 

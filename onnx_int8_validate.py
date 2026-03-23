@@ -29,7 +29,6 @@ from onnx_int8_calibration import (
 
 PROJECT_DIR = Path(__file__).resolve().parent
 FP32_DIR = PROJECT_DIR / "models" / "fp32"
-INT8_DIR = PROJECT_DIR / "models" / "int8"
 WAV_DIR = PROJECT_DIR / "test"
 
 # Single-chunk numerical thresholds
@@ -110,7 +109,7 @@ def validate_encoder(fp32_path: Path, int8_path: Path, inputs: dict) -> bool:
     return compare_outputs("encoder", out32, out8)
 
 
-def validate_streaming(wav_name: str = "jfk.wav") -> bool:
+def validate_streaming(int8_dir: Path, wav_name: str = "jfk.wav") -> bool:
     """Streaming validation: feed real audio chunk-by-chunk with warm caches.
 
     Runs both FP32 and INT8 encoders sequentially, feeding output caches back
@@ -134,7 +133,7 @@ def validate_streaming(wav_name: str = "jfk.wav") -> bool:
 
     # Load models
     fp32_enc = create_session(FP32_DIR / "encoder-model-streaming.onnx")
-    int8_enc = create_session(INT8_DIR / "encoder-model-streaming.onnx")
+    int8_enc = create_session(int8_dir / "encoder-model-streaming.onnx")
     decoder = create_session(FP32_DIR / "decoder_joint-model-streaming.onnx")
 
     # Compute mel features from real audio
@@ -273,6 +272,18 @@ def validate_streaming(wav_name: str = "jfk.wav") -> bool:
 
 
 def main() -> None:
+    import argparse
+    parser = argparse.ArgumentParser(description="Validate INT8 quantized encoder against FP32")
+    parser.add_argument(
+        "--mode",
+        choices=["dynamic", "static"],
+        default="static",
+        help="Which INT8 variant to validate (default: static)",
+    )
+    args = parser.parse_args()
+
+    int8_dir = PROJECT_DIR / "models" / f"int8-{args.mode}"
+
     np.random.seed(42)
 
     all_passed = True
@@ -281,13 +292,13 @@ def main() -> None:
     enc_inputs = make_encoder_inputs()
     ok = validate_encoder(
         FP32_DIR / "encoder-model-streaming.onnx",
-        INT8_DIR / "encoder-model-streaming.onnx",
+        int8_dir / "encoder-model-streaming.onnx",
         enc_inputs,
     )
     all_passed &= ok
 
     # Streaming validation with real audio and warm caches
-    ok = validate_streaming("jfk.wav")
+    ok = validate_streaming(int8_dir, "jfk.wav")
     all_passed &= ok
 
     print(f"\n{'=' * 40}")
